@@ -3,6 +3,10 @@
 A 40-second looping animation of the Core Theory equation (after S. Carroll & F. Wilczek):
 assembly → glow sequence with bilingual captions → 5 s hold → one rotating "what's missing" beat → particle dissolve.
 
+## Windows
+
+A separate Windows screensaver (`.scr`) is in the [`windows`](windows/) folder. See its README.
+
 ## Install (Ubuntu 24.04, Firefox)
 
 1. Copy this folder to the smartboard PC (USB drive or download).
