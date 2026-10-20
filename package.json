@@ -1,0 +1,15 @@
+{
+  "name": "core-theory",
+  "version": "1.0.0",
+  "description": "Animated Core Theory equation classroom screensaver",
+  "scripts": {
+    "build": "python3 build.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "katex": "^0.16.47"
+  },
+  "private": true
+}

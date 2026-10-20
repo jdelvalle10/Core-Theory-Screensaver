@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Core Theory</title>
+<style>/*__KATEX_CSS__*/</style>
+<style>
+  :root {
+    --bg: #04060c;
+    --ink: #e9edf6;
+    --label: #ff6f61;
+    --label-soft: #ff9d93;
+    --caption: #f2f4fa;
+    --caption-soft: #9aa6bf;
+    --muted: #6b7690;
+  }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    cursor: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  body.preview { cursor: default; }
+  #stage { position: fixed; inset: 0; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 42%, #0b1222 0%, #060913 55%, #020308 100%); }
+  #fx { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #eq { position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+    white-space: nowrap; color: var(--ink); }
+  #eq .line { text-align: center; }
+  #eq .katex-display { margin: 0; }
+  #eq .katex { font-size: 1em; }
+  #eq .cmp { display: inline-block; will-change: transform, opacity, filter; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .lbl { position: absolute; transform: translateX(-50%); text-align: center; white-space: nowrap;
+    font-family: "Ubuntu", "Optima", "Candara", "Segoe UI", "DejaVu Sans", sans-serif;
+    color: var(--label); opacity: 0; line-height: 1.15; }
+  .lbl .es { color: var(--label-soft); font-size: 0.72em; opacity: 0.85; }
+  #caption { position: absolute; left: 50%; transform: translateX(-50%); width: 84vw; text-align: center;
+    font-family: "Ubuntu", "Optima", "Candara", "Segoe UI", "DejaVu Sans", sans-serif; opacity: 0; }
+  #caption .tag { color: var(--label); font-size: 2.3vh; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 1.1vh; }
+  #caption .en { color: var(--caption); font-size: 3.4vh; line-height: 1.3; }
+  #caption .es { color: var(--caption-soft); font-size: 2.9vh; line-height: 1.3; margin-top: 0.8vh; }
+  #ghost { position: absolute; opacity: 0; color: #ffd27a; pointer-events: none; }
+  #ghost .katex { font-size: 1em; }
+  #credit { position: absolute; right: 2.2vw; bottom: 2.2vh; color: var(--muted);
+    font-family: "Ubuntu", "Optima", "Segoe UI", "DejaVu Sans", sans-serif; font-size: 1.55vh; letter-spacing: 0.04em; }
+  #hint { position: absolute; left: 2.2vw; bottom: 2.2vh; color: var(--muted); opacity: 0;
+    font-family: "Ubuntu", "Optima", "Segoe UI", "DejaVu Sans", sans-serif; font-size: 1.55vh; transition: opacity 0.8s; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="fx"></canvas>
+  <div id="eq"><div class="line" id="l1"></div><div class="line" id="l2"></div></div>
+  <svg id="overlay"></svg>
+  <div id="labels"></div>
+  <div id="ghost"></div>
+  <div id="caption"><div class="tag"></div><div class="en"></div><div class="es"></div></div>
+  <div id="credit">Core Theory — after S. Carroll &amp; F. Wilczek</div>
+  <div id="hint">Touch to exit · Toque para salir</div>
+</div>
+<script>/*__KATEX_JS__*/</script>
+<script>
+(() => {
+"use strict";
+
+/* ===================== Configuration ===================== */
+const CYCLE = 40;                       // seconds per loop
+const params = new URLSearchParams(location.search);
+const KIOSK = params.get("kiosk") === "1";
+const FROZEN_T = params.has("t") ? parseFloat(params.get("t")) : null;
+const FORCED_EGG = params.has("egg") ? parseInt(params.get("egg"), 10) : null;
+const FX_MAX_W = parseFloat(params.get("fxw") || "1920");   // cap on effects-canvas pixel width (4K performance)
+if (!KIOSK) document.body.classList.add("preview");
+
+// Component colors (glow / effects)
+const COL = {
+  st: [95, 212, 255],   // spacetime: cyan
+  gr: [255, 179, 71],   // gravity: amber
+  fo: [154, 184, 255],  // forces: electric blue-white
+  ma: [109, 255, 170],  // matter: green
+  yu: [255, 122, 217],  // Yukawa: pink (matter x Higgs)
+  hi: [192, 139, 255],  // Higgs: violet
+  qm: [214, 228, 255],  // quantum mechanics: pale blue-white
+};
+const INK = [233, 237, 246];
+
+/* Labels + captions (approved text) */
+const LABELS = [
+  { key: "st", pos: "top", en: "spacetime", es: "espacio-tiempo",
+    cen: "The 4-dimensional stage (3 of space + 1 of time) where everything happens.",
+    ces: "El escenario de 4 dimensiones (3 de espacio + 1 de tiempo) donde todo ocurre." },
+  { key: "gr", pos: "top", en: "gravity", es: "gravedad",
+    cen: "Mass and energy curve spacetime. This is Einstein’s general relativity.",
+    ces: "La masa y la energía curvan el espacio-tiempo. Es la relatividad general de Einstein." },
+  { key: "fo", pos: "bottom", en: "other forces", es: "otras fuerzas",
+    cen: "Electromagnetic, weak, and strong forces, carried by photons, W and Z bosons, and gluons.",
+    ces: "Fuerzas electromagnética, débil y fuerte, transmitidas por fotones, bosones W y Z, y gluones." },
+  { key: "ma", pos: "bottom", en: "matter", es: "materia", parts: ["ma", "yu"],
+    cen: "Quarks and leptons, such as electrons, and how they interact with forces and the Higgs field.",
+    ces: "Quarks y leptones, como los electrones, y cómo interactúan con las fuerzas y el campo de Higgs." },
+  { key: "hi", pos: "bottom", en: "Higgs", es: "Higgs",
+    cen: "A field filling all of space that gives mass to many elementary particles. Its particle was discovered at CERN in 2012.",
+    ces: "Un campo que llena todo el espacio y da masa a muchas partículas elementales. Su partícula se descubrió en el CERN en 2012." },
+  { key: "qm", pos: "top", en: "quantum mechanics", es: "mecánica cuántica",
+    cen: "To predict what happens, we add up contributions from every possible history (Feynman’s path integral).",
+    ces: "Para predecir lo que ocurre, se suman las contribuciones de todas las historias posibles (integral de caminos de Feynman)." },
+];
+
+const EGGS = [
+  { tag: "What’s missing? · ¿Qué falta?", ghost: "{}+\\;?", target: "slot",
+    en: "Dark matter: about 85% of the matter in the universe is not described by this equation.",
+    es: "Materia oscura: cerca del 85% de la materia del universo no está descrita por esta ecuación." },
+  { tag: "What’s missing? · ¿Qué falta?", ghost: "{}+\\;?", target: "slot",
+    en: "Dark energy: about 68% of the universe’s energy is missing from this equation.",
+    es: "Energía oscura: cerca del 68% de la energía del universo falta en esta ecuación." },
+  { tag: "What’s missing? · ¿Qué falta?", ghost: "m_\\nu\\;?", target: "nu",
+    en: "Neutrino mass: neutrinos change type as they travel, so they must have mass (Nobel Prize 2015). This equation, as written, doesn’t explain it.",
+    es: "Masa de los neutrinos: los neutrinos cambian de tipo al viajar, así que tienen masa (Premio Nobel 2015). Esta ecuación, tal como está escrita, no lo explica." },
+  { tag: "The limit · El límite", ghost: null, target: "cut",
+    en: "This equation is only trusted below a certain energy. Beyond it lies unknown physics, such as quantum gravity.",
+    es: "Esta ecuación solo es confiable por debajo de cierta energía. Más allá hay física desconocida, como la gravedad cuántica." },
+];
+
+/* ===================== Equation (Carroll's Core Theory) ===================== */
+// Each component wrapped with \htmlClass so it can be animated on its own.
+// Leading "{}" keeps binary-operator spacing inside each component.
+const H = (cls, tex) => `\\htmlClass{cmp c-${cls}}{${tex}}`;
+const LINE1 =
+  H("qm", "W = \\int_{\\htmlClass{c-cut}{k<\\Lambda}} [Dg][DA][D\\psi][D\\Phi]\\,\\exp\\Bigg\\{ i") +
+  H("st", "{}\\int d^4x\\,\\sqrt{-g}") +
+  H("qm", "\\Bigg[") +
+  H("gr", "\\frac{m_p^2}{2}R");
+const LINE2 =
+  H("fo", "{}-\\frac{1}{4}F^a_{\\mu\\nu}F^{a\\mu\\nu}") +
+  H("ma", "{}+i\\bar\\psi^i\\gamma^\\mu D_\\mu\\psi^i") +
+  H("yu", "{}+\\left(\\bar\\psi^i_L V_{ij}\\Phi\\psi^j_R+\\mathrm{h.c.}\\right)") +
+  H("hi", "{}-|D_\\mu\\Phi|^2-V(\\Phi)") +
+  H("qm", "\\Bigg]\\Bigg\\}");
+
+const kopts = { displayMode: true, trust: true, strict: false, throwOnError: true, output: "html" };
+katex.render(LINE1, document.getElementById("l1"), kopts);
+katex.render(LINE2, document.getElementById("l2"), kopts);
+
+/* ===================== Helpers ===================== */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, k) => a + (b - a) * k;
+const prog = (t, a, b) => clamp((t - a) / (b - a));              // 0..1 over [a,b]
+const easeOut = k => 1 - Math.pow(1 - k, 3);
+const easeIn = k => k * k * k;
+const easeInOut = k => k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const win = (t, a, b, fi, fo) => Math.min(prog(t, a, a + fi), 1 - prog(t, b - fo, b)); // fade-in/out window
+const rgba = (c, a) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const mix = (c1, c2, k) => [lerp(c1[0], c2[0], k), lerp(c1[1], c2[1], k), lerp(c1[2], c2[2], k)];
+function rng(seed) {                         // mulberry32: deterministic randomness
+  let s = seed >>> 0;
+  return () => { s = (s + 0x6D2B79F5) >>> 0; let r = Math.imul(s ^ (s >>> 15), 1 | s);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; };
+}
+const hash = (n) => { const r = rng(n * 9973 + 17); return r(); };
+
+/* ===================== DOM refs ===================== */
+const stage = $("#stage"), eqEl = $("#eq"), overlay = $("#overlay"), labelsEl = $("#labels");
+const capEl = $("#caption"), capTag = $("#caption .tag"), capEn = $("#caption .en"), capEs = $("#caption .es");
+const ghostEl = $("#ghost"), hintEl = $("#hint"), creditEl = $("#credit");
+const canvas = $("#fx"), ctx = canvas.getContext("2d");
+const cmps = { st: [], gr: [], fo: [], ma: [], yu: [], hi: [], qm: [] };
+$$(".cmp", eqEl).forEach(el => { const k = [...el.classList].find(c => c.startsWith("c-")).slice(2); cmps[k].push(el); });
+const cutEl = $(".c-cut", eqEl);
+
+/* ===================== Layout (measured at rest) ===================== */
+let L = null;   // layout cache
+const NS = "http://www.w3.org/2000/svg";
+
+function resetStyles() {
+  Object.values(cmps).flat().forEach(el => { el.style.opacity = 1; el.style.transform = "none"; el.style.filter = "none"; el.style.color = ""; });
+  if (L) L.leaves.forEach(l => l.el.style.opacity = "");
+}
+
+function unionRect(els) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  els.forEach(el => { const r = el.getBoundingClientRect(); if (!r.width && !r.height) return;
+    x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top); x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom); });
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, r: x1, b: y1 };
+}
+
+function layout() {
+  resetStyles();
+  const W = innerWidth, Hh = innerHeight;
+  // Fit equation: 90% of width, and leave room for labels + captions.
+  eqEl.style.fontSize = "100px";
+  const nat = eqEl.getBoundingClientRect();
+  const f = Math.min(100 * (0.9 * W) / nat.width, 100 * (0.40 * Hh) / nat.height);
+  eqEl.style.fontSize = f + "px";
+  const er = eqEl.getBoundingClientRect();
+  eqEl.style.top = (0.43 * Hh - er.height / 2) + "px";
+
+  const R = {}; for (const k in cmps) R[k] = unionRect(cmps[k]);
+  R.qmHead = unionRect([cmps.qm[0]]);
+  R.l1 = unionRect([$("#l1 .katex-html")]); R.l2 = unionRect([$("#l2 .katex-html")]);
+  R.eq = eqEl.getBoundingClientRect();
+  R.cut = unionRect([cutEl]);
+  const lastQm = cmps.qm[cmps.qm.length - 1];
+  R.close = unionRect([lastQm]);
+
+  // Leaves (individual glyphs / rules) for the dissolve
+  const leaves = [];
+  $$(".katex-html *", eqEl).forEach(el => {
+    if (el.closest("svg") && el.tagName.toLowerCase() !== "svg") return;
+    const isSvg = el.tagName.toLowerCase() === "svg";
+    if (!isSvg && el.children.length) return;
+    const cls = el.className && el.className.baseVal === undefined ? el.className : "";
+    const visible = isSvg || (el.textContent.trim().length > 0) || /frac-line|hline|overline-line|underline-line/.test(cls);
+    if (!visible) return;
+    const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 0.5) return;
+    leaves.push({ el, x: r.left, y: r.top, w: r.width, h: r.height });
+  });
+
+  // Brackets + labels geometry
+  const gap = f * 0.42;
+  const topY = Math.min(R.qmHead.y, R.st.y, R.gr.y) - gap;
+  const botY = Math.max(R.fo.b, R.ma.b, R.yu.b, R.hi.b) + gap * 0.35;
+  const br = {};
+  LABELS.forEach(lb => {
+    const rect = lb.key === "qm" ? R.qmHead : lb.key === "ma" ? unionRect([...cmps.ma, ...cmps.yu]) : R[lb.key];
+    const inset = f * 0.12;
+    br[lb.key] = { x0: rect.x + inset, x1: rect.r - inset, y: lb.pos === "top" ? topY : botY, pos: lb.pos };
+  });
+
+  // SVG overlay: brackets
+  overlay.setAttribute("viewBox", `0 0 ${W} ${Hh}`);
+  overlay.innerHTML = "";
+  const sw = Math.max(2, f * 0.03), dia = f * 0.075;
+  LABELS.forEach(lb => {
+    const b = br[lb.key]; const g = document.createElementNS(NS, "g"); g.setAttribute("opacity", "0");
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("y1", b.y); line.setAttribute("y2", b.y);
+    line.setAttribute("stroke", "#ff6f61"); line.setAttribute("stroke-width", sw); line.setAttribute("stroke-linecap", "round");
+    const mk = () => { const p = document.createElementNS(NS, "path");
+      p.setAttribute("d", `M0,${-dia} L${dia},0 L0,${dia} L${-dia},0 Z`); p.setAttribute("fill", "#ff6f61"); return p; };
+    const d0 = mk(), d1 = mk();
+    g.append(line, d0, d1); overlay.append(g);
+    b.g = g; b.line = line; b.d0 = d0; b.d1 = d1;
+  });
+
+  // Labels
+  labelsEl.innerHTML = "";
+  const lfs = Math.max(14, Math.min(f * 0.42, Hh * 0.034));
+  LABELS.forEach(lb => {
+    const b = br[lb.key]; const d = document.createElement("div"); d.className = "lbl";
+    d.style.fontSize = lfs + "px";
+    const es = lb.es !== lb.en ? `<div class="es">${lb.es}</div>` : "";
+    d.innerHTML = lb.pos === "top" ? `${es}<div>${lb.en}</div>` : `<div>${lb.en}</div>${es}`;
+    labelsEl.append(d);
+    d.style.left = ((b.x0 + b.x1) / 2) + "px";
+    const h = d.getBoundingClientRect().height;
+    d.style.top = (lb.pos === "top" ? b.y - h - lfs * 0.35 : b.y + lfs * 0.3) + "px";
+    b.label = d;
+  });
+  const lowestLabel = Math.max(...LABELS.filter(l => l.pos === "bottom").map(l => br[l.key].label.getBoundingClientRect().bottom));
+  capEl.style.top = Math.max(lowestLabel + Hh * 0.045, Hh * 0.74) + "px";
+
+  // Ghost term placement font size
+  ghostEl.style.fontSize = f + "px";
+
+  // Effects canvas
+  const dpr = devicePixelRatio || 1;
+  const fxScale = Math.min(dpr, FX_MAX_W / W);
+  canvas.width = Math.round(W * fxScale); canvas.height = Math.round(Hh * fxScale);
+
+  // Deterministic particle sets
+  const r = rng(1234);
+  const pick = (rect) => [rect.x + r() * rect.w, rect.y + r() * rect.h];
+  const stP = Array.from({ length: 220 }, () => ({ g: [Math.round(r() * 24) / 24 * W, Math.round(r() * 14) / 14 * Hh], d: pick(R.st), s: r() }));
+  const maP = Array.from({ length: 260 }, () => ({ a0: r() * Math.PI * 2, r0: (0.25 + r() * 0.4) * Hh, d: pick(R.ma), s: r() }));
+  const hiP = Array.from({ length: 160 }, () => ({ d: pick(R.hi), s: r() }));
+  const qmP = Array.from({ length: 42 }, () => ({ a: [r() - 0.5, r() - 0.5, r() - 0.5], ph: [r() * 6.28, r() * 6.28, r() * 6.28], s: r() }));
+  // Dissolve particles: spread over leaves, proportional to area, capped.
+  const totalArea = leaves.reduce((s, l) => s + l.w * l.h, 0) || 1;
+  const budget = 4200;
+  const dust = [];
+  const xMin = R.eq.left, xMax = R.eq.right;
+  leaves.forEach(l => {
+    l.tOff = 37.0 + 2.0 * clamp((l.x - xMin) / (xMax - xMin)) + (r() - 0.5) * 0.35;
+    const n = Math.max(2, Math.round(budget * (l.w * l.h) / totalArea));
+    for (let i = 0; i < n; i++) dust.push({ x: l.x + r() * l.w, y: l.y + r() * l.h, t0: l.tOff + r() * 0.25,
+      vx: (0.04 + r() * 0.08) * W, vy: -(0.02 + r() * 0.08) * Hh, ph: r() * 6.28, s: r() });
+  });
+  // Bracket/label dust
+  LABELS.forEach(lb => { const b = br[lb.key];
+    const t0 = 37.0 + 2.0 * clamp(((b.x0 + b.x1) / 2 - xMin) / (xMax - xMin));
+    const lr = b.label.getBoundingClientRect();
+    for (let i = 0; i < 120; i++) { const onLine = i < 50;
+      dust.push({ x: onLine ? lerp(b.x0, b.x1, r()) : lr.left + r() * lr.width, y: onLine ? b.y : lr.top + r() * lr.height,
+        t0: t0 + r() * 0.4, vx: (0.04 + r() * 0.08) * W, vy: -(0.02 + r() * 0.08) * Hh, ph: r() * 6.28, s: r(), red: true }); }
+    b.tOff = t0;
+  });
+
+  L = { W, H: Hh, f, R, br, leaves, fxScale, stP, maP, hiP, qmP, dust };
+}
+
+/* ===================== Effects drawing ===================== */
+function gridAlpha(t) {
+  if (t < 14) return 0.30 * prog(t, 0, 1.0);
+  if (t < 37) return lerp(0.30, 0.10, prog(t, 14, 16));
+  return 0.10 * (1 - prog(t, 37, 39.5));
+}
+function wellDepth(t) {
+  if (t < 2) return 0;
+  if (t < 3.6) return easeOut(prog(t, 2.0, 2.7));
+  return lerp(1, 0.28, easeInOut(prog(t, 3.6, 4.6))) * (t > 37 ? 1 - prog(t, 37, 39) : 1);
+}
+
+function drawGrid(t) {
+  const a = gridAlpha(t); if (a <= 0.003) return;
+  const { W, H: Hh, R } = L;
+  const sp = Hh / 14;
+  const depth = wellDepth(t) * Hh * 0.10, sig = Hh * 0.16;
+  const wx = R.gr.cx, wy = R.gr.cy;
+  const warp = (x, y) => { if (depth <= 0) return [x, y];
+    const dx = wx - x, dy = wy - y, d2 = dx * dx + dy * dy, k = depth * Math.exp(-d2 / (2 * sig * sig)) / Math.sqrt(d2 + 1);
+    return [x + dx * k * 0.9, y + dy * k * 0.9 + depth * Math.exp(-d2 / (2 * sig * sig)) * 0.6]; };
+  const reveal = t < 2 ? prog(t, 0, 1.4) : 1;
+  const maxD = Math.hypot(W, Hh) / 2;
+  ctx.lineWidth = 1;
+  const drawLine = (pts, dist) => {
+    const vis = clamp(reveal * 1.4 - dist / maxD); if (vis <= 0) return;
+    ctx.strokeStyle = rgba(COL.st, a * vis); ctx.beginPath();
+    pts.forEach((p, i) => { const q = warp(p[0], p[1]); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.stroke(); };
+  for (let x = (W / 2) % sp; x <= W; x += sp) {
+    const pts = []; for (let y = 0; y <= Hh; y += sp / 4) pts.push([x, y]); drawLine(pts, Math.abs(x - W / 2)); }
+  for (let y = (Hh / 2) % sp; y <= Hh; y += sp) {
+    const pts = []; for (let x = 0; x <= W; x += sp / 4) pts.push([x, y]); drawLine(pts, Math.abs(y - Hh / 2) * 1.6); }
+}
+
+function dot(x, y, rad, c, a) {
+  if (a <= 0.002) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+  g.addColorStop(0, rgba(c, a)); g.addColorStop(1, rgba(c, 0));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 6.2832); ctx.fill();
+}
+function spark(x, y, rad, c, a) { if (a <= 0.002) return; ctx.fillStyle = rgba(c, a); ctx.beginPath(); ctx.arc(x, y, rad, 0, 6.2832); ctx.fill(); }
+
+// 1. Spacetime: points of the grid converge into the symbol
+function fxSpacetime(t) {
+  if (t < 0.5 || t > 2.2) return;
+  const { stP, H: Hh } = L;
+  stP.forEach(p => { const k = easeInOut(prog(t, 0.55 + p.s * 0.35, 1.6 + p.s * 0.3));
+    const a = Math.min(prog(t, 0.5, 0.8), 1 - prog(t, 1.75, 2.2)) * (k < 1 ? 0.9 : 0.4);
+    spark(lerp(p.g[0], p.d[0], k), lerp(p.g[1], p.d[1], k), Hh * 0.0022, COL.st, a); });
+}
+
+// 2. Gravity: the term rolls along the warped grid into the well and settles
+const GR_START = [-0.30, -0.33];
+function gravityPos(t) {                  // offset (in px) of gravity term from its final place
+  const { W, H: Hh } = L;
+  const sx = GR_START[0] * W, sy = GR_START[1] * Hh;
+  if (t < 2.2) return [sx, sy, 0];
+  if (t < 3.35) { const k = easeIn(prog(t, 2.2, 3.35));       // falling, accelerating, along a curve
+    const x = lerp(sx, 0, 1 - Math.pow(1 - k, 1.6)), y = lerp(sy, 0, k);
+    return [x, y, 0]; }
+  const u = prog(t, 3.35, 4.1);              // damped bounce
+  const b = Math.abs(Math.sin(u * Math.PI * 3)) * Math.exp(-u * 4.2) * Hh * 0.035;
+  return [0, -b, 0];
+}
+function fxGravity(t) {
+  if (t < 2.2 || t > 4.6) return;
+  const { R, H: Hh } = L;
+  for (let i = 0; i < 18; i++) {           // glowing trail
+    const tt = t - i * 0.035; if (tt < 2.2) break;
+    const p = gravityPos(tt);
+    dot(R.gr.cx + p[0], R.gr.cy + p[1], Hh * (0.03 - i * 0.0012), COL.gr, 0.20 * (1 - i / 18) * (1 - prog(t, 3.9, 4.6)));
+  }
+  const land = prog(t, 3.35, 3.9);           // landing ring
+  if (land > 0 && land < 1) { ctx.strokeStyle = rgba(COL.gr, 0.5 * (1 - land)); ctx.lineWidth = 3 * L.fxScale / L.fxScale;
+    ctx.beginPath(); ctx.ellipse(R.gr.cx, R.gr.b, Hh * 0.12 * land, Hh * 0.025 * land, 0, 0, 6.2832); ctx.stroke(); }
+}
+
+// 3. Forces: lightning (EM), flicker-and-decay (weak), three color charges merging (strong)
+function bolt(x0, y0, x1, y1, seed, disp) {
+  const r = rng(seed); let pts = [[x0, y0], [x1, y1]];
+  for (let it = 0; it < 6; it++) { const np = [pts[0]];
+    for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i];
+      np.push([(a[0] + b[0]) / 2 + (r() - 0.5) * disp, (a[1] + b[1]) / 2 + (r() - 0.5) * disp * 0.3], b); }
+    pts = np; disp *= 0.55; }
+  return pts;
+}
+function fxForces(t) {
+  if (t < 3.9 || t > 6.4) return;
+  const { R, W, H: Hh } = L;
+  if (t >= 4.0 && t < 4.5) {
+    const flicker = Math.floor(t * 22);
+    const a = (1 - prog(t, 4.0, 4.5)) * (flicker % 2 ? 1 : 0.55);
+    const pts = bolt(R.fo.cx - W * 0.05, -10, R.fo.cx, R.fo.cy, flicker, Hh * 0.35);
+    ctx.save(); ctx.shadowColor = rgba(COL.fo, 0.9); ctx.shadowBlur = Hh * 0.02 * L.fxScale;
+    [[Hh * 0.006, 0.35], [Hh * 0.0022, 1]].forEach(([w, al]) => { ctx.lineWidth = w; ctx.strokeStyle = rgba(al === 1 ? [240, 246, 255] : COL.fo, a * al);
+      ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); });
+    ctx.restore();
+    const flash = 0.16 * (1 - prog(t, 4.0, 4.35)); if (flash > 0) { ctx.fillStyle = rgba([200, 215, 255], flash); ctx.fillRect(0, 0, W, Hh); }
+    dot(R.fo.cx, R.fo.cy, Hh * 0.09, COL.fo, 0.5 * a);
+  }
+  // Strong force: red, green, blue "color charges" orbit, converge, and combine to colorless white
+  if (t >= 4.9 && t < 6.2) {
+    const k = easeInOut(prog(t, 4.9, 5.75));
+    const rad = lerp(Hh * 0.10, 0, k);
+    const cols = [[255, 70, 70], [70, 255, 120], [80, 130, 255]];
+    cols.forEach((c, i) => { const ang = t * 7 + i * 2.094;
+      const x = R.fo.cx + Math.cos(ang) * rad * 1.6, y = R.fo.cy + Math.sin(ang) * rad;
+      dot(x, y, Hh * 0.03, c, 0.85 * (1 - prog(t, 5.7, 5.85))); spark(x, y, Hh * 0.006, c, 1 - prog(t, 5.7, 5.85)); });
+    const m = prog(t, 5.7, 6.2); if (m > 0) dot(R.fo.cx, R.fo.cy, Hh * (0.04 + 0.08 * m), [255, 255, 255], 0.7 * (1 - m));
+  }
+}
+
+// 4. Matter: spinning particles condense into the symbol
+function fxMatter(t) {
+  if (t < 6 || t > 8.2) return;
+  const { R, maP, H: Hh } = L;
+  maP.forEach(p => { const k = easeInOut(prog(t, 6.0 + p.s * 0.3, 7.3 + p.s * 0.3));
+    const ang = p.a0 + k * 5.5 * (p.s > 0.5 ? 1 : -1), rad = p.r0 * (1 - k);
+    const x = lerp(R.ma.cx + Math.cos(ang) * rad * 1.5, p.d[0], k * k), y = lerp(R.ma.cy + Math.sin(ang) * rad, p.d[1], k * k);
+    const a = Math.min(prog(t, 6.0, 6.4), 1 - prog(t, 7.5, 8.2));
+    spark(x, y, Hh * 0.0024, COL.ma, a); });
+}
+
+// 5. Higgs: "Mexican hat" potential; a ball rolls off the top into the trough (symmetry breaking)
+const HAT_A = 0.62;
+function hatY(u) { const V = Math.pow(u * u - HAT_A * HAT_A, 2), Vmax = Math.pow(1 - HAT_A * HAT_A, 2); return V / Vmax; }
+function fxHiggs(t) {
+  if (t < 7.9 || t > 10.3) return;
+  const { R, H: Hh } = L;
+  const a = Math.min(prog(t, 7.9, 8.3), 1 - prog(t, 9.7, 10.2));
+  const w = R.hi.w * 0.55, hh = Hh * 0.13, bx = R.hi.cx, by = R.hi.cy + R.hi.h * 0.35;
+  ctx.lineWidth = Hh * 0.003; ctx.strokeStyle = rgba(COL.hi, 0.9 * a);
+  ctx.beginPath();
+  for (let i = 0; i <= 120; i++) { const u = -1 + 2 * i / 120; const x = bx + u * w, y = by - hatY(u) * hh; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  // ball
+  let u = 0;
+  if (t < 8.75) u = 0.03 * Math.sin(t * 30) * prog(t, 8.3, 8.75);               // trembling at the unstable top
+  else { const k = prog(t, 8.75, 9.55); u = HAT_A * easeIn(Math.min(1, k * 1.15)) ;
+    if (k > 0.87) u = HAT_A + 0.05 * Math.sin((k - 0.87) * 40) * Math.exp(-(k - 0.87) * 18); }
+  const ballR = Hh * 0.016;
+  const yb = by - hatY(u) * hh - ballR;
+  dot(bx + u * w, yb, ballR * 3, COL.hi, 0.6 * a); spark(bx + u * w, yb, ballR, [240, 225, 255], a);
+  // crystallization burst
+  if (t > 9.4) L.hiP.forEach(p => { const k = easeOut(prog(t, 9.4 + p.s * 0.15, 9.95 + p.s * 0.15));
+    spark(lerp(bx + u * w, p.d[0], k), lerp(yb, p.d[1], k), Hh * 0.0022, COL.hi, (1 - prog(t, 9.9, 10.3))); });
+}
+
+// 6. Yukawa: threads tie matter to the Higgs, then the coupling locks in
+function qbez(p0, p1, p2, k) { const a = lerp(p0, p1, k), b = lerp(p1, p2, k); return lerp(a, b, k); }
+function fxYukawa(t) {
+  if (t < 10 || t > 12.2) return;
+  const { R, H: Hh } = L;
+  const a = Math.min(prog(t, 10, 10.3), 1 - prog(t, 11.6, 12.1));
+  const target = [R.yu.cx, R.yu.cy];
+  [[R.ma, COL.ma], [R.hi, COL.hi]].forEach(([src, c], j) => {
+    const s = [src.cx, src.b], e = [target[0], R.yu.b];
+    const ctrl = [(s[0] + e[0]) / 2, Math.max(s[1], e[1]) + Hh * 0.12];
+    const reveal = easeOut(prog(t, 10.0, 10.8));
+    ctx.lineWidth = Hh * 0.003; ctx.strokeStyle = rgba(mix(c, COL.yu, 0.3), 0.75 * a);
+    ctx.beginPath();
+    for (let i = 0; i <= 60 * reveal; i++) { const k = i / 60; const x = qbez(s[0], ctrl[0], e[0], k), y = qbez(s[1], ctrl[1], e[1], k); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+    for (let q = 0; q < 3; q++) { const k = prog(t, 10.4 + q * 0.18, 11.2 + q * 0.18); if (k <= 0 || k >= 1) continue;
+      dot(qbez(s[0], ctrl[0], e[0], k), qbez(s[1], ctrl[1], e[1], k), Hh * 0.018, mix(c, COL.yu, k), 0.8 * a); }
+  });
+  const lk = prog(t, 11.15, 11.75);
+  if (lk > 0 && lk < 1) { ctx.strokeStyle = rgba(COL.yu, 0.7 * (1 - lk)); ctx.lineWidth = Hh * 0.003;
+    ctx.beginPath(); ctx.ellipse(R.yu.cx, R.yu.cy, R.yu.w * (0.5 + 0.4 * lk), R.yu.h * (0.6 + 0.6 * lk), 0, 0, 6.2832); ctx.stroke(); }
+}
+
+// 7. Quantum mechanics: many possible histories fan out and superpose; the path integral closes around everything
+function fxQuantum(t) {
+  if (t < 12 || t > 14.3) return;
+  const { R, qmP, H: Hh } = L;
+  const p0 = [R.qmHead.x, R.eq.top + R.eq.height / 2], p1 = [R.close.r, R.eq.top + R.eq.height / 2];
+  const reveal = easeOut(prog(t, 12.0, 12.9));
+  const a = Math.min(prog(t, 12.0, 12.3), 1 - prog(t, 13.3, 14.2));
+  ctx.lineWidth = Math.max(1, Hh * 0.0012);
+  qmP.forEach(p => {
+    ctx.strokeStyle = rgba(mix(COL.qm, COL.st, p.s), 0.22 * a); ctx.beginPath();
+    const n = 90, m = Math.floor(n * reveal);
+    for (let i = 0; i <= m; i++) { const k = i / n, env = Math.sin(Math.PI * k);
+      const y = p0[1] + env * Hh * (p.a[0] * Math.sin(k * 3.1 + p.ph[0]) * 0.55 + p.a[1] * Math.sin(k * 7.3 + p.ph[1]) * 0.25 + p.a[2] * Math.sin(k * 13 + p.ph[2] + t) * 0.08);
+      const x = lerp(p0[0], p1[0], k); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke(); });
+  dot(p0[0], p0[1], Hh * 0.02, COL.qm, 0.6 * a); dot(p1[0], p1[1], Hh * 0.02, COL.qm, 0.6 * a * reveal);
+}
+
+// Dissolve: the equation turns to drifting dust, left to right
+function fxDust(t) {
+  if (t < 37) return;
+  const { dust, H: Hh } = L;
+  const dustCol = [214, 190, 160];
+  dust.forEach(p => { const u = t - p.t0; if (u < 0 || u > 2.6) return;
+    const a = (u < 0.15 ? u / 0.15 : 1) * (1 - clamp(u / 2.6));
+    const x = p.x + p.vx * u * (0.6 + u * 0.4) + Math.sin(p.ph + u * 3) * Hh * 0.006 * u;
+    const y = p.y + p.vy * u * (0.5 + u * 0.5) + Math.cos(p.ph + u * 2.3) * Hh * 0.004 * u;
+    spark(x, y, Hh * (0.0012 + p.s * 0.0014), p.red ? [255, 130, 115] : dustCol, 0.85 * a); });
+}
+
+/* ===================== DOM animation (per component) ===================== */
+function setCmp(key, o) {
+  cmps[key].forEach((el, i) => {
+    const op = typeof o.op === "function" ? o.op(i) : o.op;
+    el.style.opacity = op;
+    el.style.transform = o.tf || "none";
+    el.style.filter = o.filter || "none";
+    el.style.color = o.color || "";
+  });
+}
+const glowFilter = (c, k, f) => k > 0.01 ? `drop-shadow(0 0 ${(0.08 * f * k).toFixed(1)}px ${rgba(c, 0.95 * k)}) drop-shadow(0 0 ${(0.25 * f * k).toFixed(1)}px ${rgba(c, 0.6 * k)})` : "none";
+const blurF = (px) => px > 0.2 ? `blur(${px.toFixed(1)}px)` : "";
+
+const GLOW_ORDER = ["st", "gr", "fo", "ma", "hi", "qm"];
+const GLOW_T0 = 14, GLOW_DT = 2.5;
+
+function glowAmount(key, t) {
+  const idx = GLOW_ORDER.indexOf(key === "yu" ? "ma" : key);
+  const a = GLOW_T0 + idx * GLOW_DT;
+  let g = win(t, a, a + GLOW_DT, 0.4, 0.6);
+  // arrival glow
+  const arrive = { st: [1.3, 2.4], gr: [3.3, 4.4], fo: [4.1, 6.3], ma: [7.0, 8.2], hi: [9.5, 10.5], yu: [11.1, 12.2], qm: [12.8, 14] }[key];
+  g = Math.max(g, 0.8 * win(t, arrive[0], arrive[1], 0.15, 0.6));
+  if (t > 29 && t < 34) g = Math.max(g, 0.12 + 0.08 * Math.sin((t - 29) * 2.4));   // gentle breathing during the hold
+  return g;
+}
+
+function animateDom(t) {
+  const f = L.f, Hh = L.H;
+  const after = (a, b) => prog(t, a, b);
+  // Spacetime
+  { const k = after(1.3, 2.0); setCmp("st", { op: k, filter: [blurF((1 - k) * f * 0.15), glowFilter(COL.st, glowAmount("st", t), f)].join(" ").trim() || "none" }); }
+  // Gravity
+  { const p = gravityPos(t), k = after(2.2, 2.5);
+    setCmp("gr", { op: k, tf: `translate(${p[0].toFixed(1)}px, ${p[1].toFixed(1)}px)`, filter: glowFilter(COL.gr, glowAmount("gr", t), f) }); }
+  // Forces: appears with the lightning, then flickers (weak decay) before steadying
+  { let op = t < 4.15 ? 0 : 1;
+    if (t >= 4.15 && t < 5.2) { const b = Math.floor(t * 18); const dec = prog(t, 4.15, 5.2); op = hash(b) > 0.45 * (1 - dec) ? 1 : 0.15; }
+    setCmp("fo", { op, filter: glowFilter(COL.fo, glowAmount("fo", t), f) }); }
+  // Matter
+  { const k = after(7.0, 7.8); setCmp("ma", { op: k, tf: `scale(${lerp(1.12, 1, easeOut(k)).toFixed(3)})`,
+      filter: [blurF((1 - k) * f * 0.12), glowFilter(COL.ma, glowAmount("ma", t), f)].join(" ").trim() || "none" }); }
+  // Higgs
+  { const k = after(9.5, 10.05); setCmp("hi", { op: k, filter: [blurF((1 - k) * f * 0.1), glowFilter(COL.hi, glowAmount("hi", t), f)].join(" ").trim() || "none" }); }
+  // Yukawa
+  { const k = after(11.15, 11.5); setCmp("yu", { op: k, tf: `scale(${lerp(1.18, 1, easeOut(after(11.15, 11.8))).toFixed(3)})`,
+      filter: glowFilter(COL.yu, Math.max(glowAmount("yu", t), glowAmount("ma", t)), f) }); }
+  // Quantum mechanics wrapper: pieces close in from the outside
+  { const n = cmps.qm.length;
+    setCmp("qm", { op: (i) => after(12.8 + (i === 0 ? 0 : 0.3 + i * 0.12), 13.5 + (i === 0 ? 0 : 0.3 + i * 0.12)),
+      filter: glowFilter(COL.qm, glowAmount("qm", t), f) }); }
+
+  // Brackets + labels (appear during the glow sequence, stay until the dissolve)
+  LABELS.forEach((lb, i) => {
+    const b = L.br[lb.key], a = GLOW_T0 + i * GLOW_DT;
+    const k = easeOut(prog(t, a, a + 0.6));
+    const cx = (b.x0 + b.x1) / 2, x0 = lerp(cx, b.x0, k), x1 = lerp(cx, b.x1, k);
+    const vis = t >= a ? 1 : 0;
+    const dissolve = t > 37 ? 1 - prog(t, b.tOff, b.tOff + 0.35) : 1;
+    b.g.setAttribute("opacity", vis * dissolve);
+    b.line.setAttribute("x1", x0); b.line.setAttribute("x2", x1);
+    const ds = prog(t, a + 0.5, a + 0.75);
+    b.d0.setAttribute("transform", `translate(${x0},${b.y}) scale(${ds})`);
+    b.d1.setAttribute("transform", `translate(${x1},${b.y}) scale(${ds})`);
+    b.label.style.opacity = prog(t, a + 0.35, a + 0.9) * dissolve;
+  });
+
+  // Captions
+  let cap = null, capOp = 0;
+  if (t >= GLOW_T0 && t < GLOW_T0 + 6 * GLOW_DT) {
+    const i = Math.floor((t - GLOW_T0) / GLOW_DT), a = GLOW_T0 + i * GLOW_DT;
+    const lb = LABELS[i]; cap = { tag: `${lb.en} · ${lb.es}`, en: lb.cen, es: lb.ces };
+    capOp = win(t, a + 0.15, a + GLOW_DT, 0.3, 0.25);
+  } else if (t >= 34 && t < 38.6) {
+    const e = EGGS[currentEgg]; cap = { tag: e.tag, en: e.en, es: e.es };
+    capOp = win(t, 34.05, 38.6, 0.35, 0.5);
+  }
+  if (cap && capTag.dataset.k !== cap.en) { capTag.textContent = cap.tag; capEn.textContent = cap.en; capEs.textContent = cap.es; capTag.dataset.k = cap.en; }
+  capEl.style.opacity = capOp;
+
+  // Easter egg visuals
+  const egg = EGGS[currentEgg];
+  const eggOn = win(t, 34, 37.2, 0.4, 0.4);
+  ghostEl.style.opacity = 0;
+  if (eggOn > 0) {
+    if (egg.target === "cut") {
+      const pulse = 0.5 + 0.5 * Math.sin((t - 34) * 6);
+      cutEl.style.color = `rgb(${mix(INK, [255, 210, 122], eggOn).map(Math.round).join(",")})`;
+      cutEl.style.filter = glowFilter([255, 210, 122], eggOn * (0.6 + 0.4 * pulse), f);
+    } else {
+      if (ghostEl.dataset.k !== egg.ghost) { katex.render(egg.ghost, ghostEl, { displayMode: false, strict: false }); ghostEl.dataset.k = egg.ghost; }
+      const gr = ghostEl.getBoundingClientRect();
+      let gx, gy;
+      if (egg.target === "slot") { gx = L.R.close.x - gr.width * 0.5; gy = L.R.l2.y - gr.height * 0.85; }
+      else { const m = unionRectStatic("yu"); gx = m.cx - gr.width / 2; gy = L.R.l2.y - gr.height * 0.85; }
+      const bob = Math.sin((t - 34) * 3) * Hh * 0.006;
+      ghostEl.style.left = gx + "px"; ghostEl.style.top = (gy + bob) + "px";
+      ghostEl.style.opacity = eggOn * (0.65 + 0.35 * Math.sin((t - 34) * 5));
+      ghostEl.style.filter = `drop-shadow(0 0 ${(0.15 * f).toFixed(1)}px rgba(255,210,122,0.8))`;
+    }
+  }
+  if (egg.target !== "cut" || eggOn <= 0) { cutEl.style.color = ""; cutEl.style.filter = "none"; }
+
+  // Dissolve of glyphs
+  const dis = t >= 37;
+  L.leaves.forEach(l => { l.el.style.opacity = dis ? (1 - prog(t, l.tOff, l.tOff + 0.3)).toFixed(3) : ""; });
+
+  // Insertion caret for the "slot" egg
+  drawSlotMark(t, egg, eggOn);
+}
+function unionRectStatic(k) { return L.R[k]; }
+let slotMark = null;
+function drawSlotMark(t, egg, on) {
+  if (!slotMark) { slotMark = document.createElementNS(NS, "line"); slotMark.setAttribute("stroke", "#ffd27a");
+    slotMark.setAttribute("stroke-dasharray", "6 6"); overlay.append(slotMark); }
+  if (!slotMark.isConnected) overlay.append(slotMark);
+  const R = L.R;
+  slotMark.setAttribute("x1", R.close.x - L.f * 0.06); slotMark.setAttribute("x2", R.close.x - L.f * 0.06);
+  slotMark.setAttribute("y1", R.l2.y + R.l2.h * 0.15); slotMark.setAttribute("y2", R.l2.b - R.l2.h * 0.15);
+  slotMark.setAttribute("stroke-width", Math.max(2, L.f * 0.025));
+  slotMark.setAttribute("opacity", egg.target === "slot" ? on * (0.5 + 0.5 * Math.sin((t - 34) * 8)) : 0);
+}
+
+/* ===================== Main loop ===================== */
+let start = performance.now(), currentEgg = 0, lastCycle = -1, eggBase = 0;
+try { eggBase = parseInt(localStorage.getItem("coreTheoryEgg") || "0", 10) || 0; } catch (e) {}
+
+function frame(now) {
+  const elapsed = FROZEN_T !== null ? FROZEN_T : (now - start) / 1000;
+  const cycle = Math.floor(elapsed / CYCLE), t = elapsed - cycle * CYCLE;
+  if (cycle !== lastCycle) {
+    lastCycle = cycle;
+    currentEgg = FORCED_EGG !== null ? (FORCED_EGG % EGGS.length) : (eggBase + cycle) % EGGS.length;
+    try { localStorage.setItem("coreTheoryEgg", String((currentEgg + 1) % EGGS.length)); } catch (e) {}
+  }
+  ctx.setTransform(L.fxScale, 0, 0, L.fxScale, 0, 0);
+  ctx.clearRect(0, 0, L.W, L.H);
+  drawGrid(t);
+  ctx.globalCompositeOperation = "lighter";
+  fxSpacetime(t); fxGravity(t); fxForces(t); fxMatter(t); fxHiggs(t); fxYukawa(t); fxQuantum(t); fxDust(t);
+  ctx.globalCompositeOperation = "source-over";
+  animateDom(t);
+  if (FROZEN_T === null) requestAnimationFrame(frame);
+}
+
+/* ===================== Exit (kiosk) ===================== */
+if (KIOSK) {
+  hintEl.style.opacity = 1; setTimeout(() => hintEl.style.opacity = 0, 6000);
+  const armedAt = performance.now() + 1500;
+  const quit = () => { if (performance.now() < armedAt) return; window.close(); };
+  addEventListener("pointerdown", quit); addEventListener("touchstart", quit, { passive: true }); addEventListener("keydown", quit);
+}
+
+/* ===================== Start ===================== */
+let resizeTimer = null;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { layout(); if (FROZEN_T !== null) requestAnimationFrame(frame); }, 200); });
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+  layout();
+  window.__ready = true;
+  requestAnimationFrame(frame);
+});
+})();
+</script>
+</body>
+</html>
